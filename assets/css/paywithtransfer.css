@@ -1,0 +1,237 @@
+/**
+ * OnePipe PayWithTransfer - Modal & Payment UI Styles
+ */
+
+/* Overlay */
+.onepipe-pwt-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 999999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+/* Modal container */
+.onepipe-pwt-modal {
+    background: #fff;
+    border-radius: 12px;
+    max-width: 440px;
+    width: 100%;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
+    animation: onepipe-pwt-fadein 0.25s ease-out;
+}
+
+@keyframes onepipe-pwt-fadein {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Header */
+.onepipe-pwt-modal-header {
+    background: #d4af37;
+    color: #1a1a1a;
+    padding: 18px 24px;
+}
+
+.onepipe-pwt-modal-header h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: #1a1a1a;
+}
+
+/* Body */
+.onepipe-pwt-modal-body {
+    padding: 24px;
+}
+
+.onepipe-pwt-instructions {
+    margin: 0 0 20px;
+    color: #555;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+/* Detail rows */
+.onepipe-pwt-detail {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.onepipe-pwt-detail:last-of-type {
+    border-bottom: none;
+}
+
+.onepipe-pwt-label {
+    color: #777;
+    font-size: 13px;
+    flex-shrink: 0;
+    margin-right: 12px;
+}
+
+.onepipe-pwt-value {
+    color: #222;
+    font-size: 14px;
+    font-weight: 500;
+    text-align: right;
+    word-break: break-all;
+}
+
+/* Account number row */
+.onepipe-pwt-account-row .onepipe-pwt-value {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.onepipe-pwt-acct-num {
+    font-size: 18px;
+    font-weight: 700;
+    color: #c9b037;
+    letter-spacing: 1px;
+}
+
+/* Amount row */
+.onepipe-pwt-amount-row {
+    background: #fdf9ec;
+    margin: 12px -24px 0;
+    padding: 14px 24px !important;
+    border-bottom: none !important;
+}
+
+.onepipe-pwt-amount-row .onepipe-pwt-value strong {
+    font-size: 20px;
+    color: #c9b037;
+}
+
+/* Copy button */
+.onepipe-pwt-copy-btn {
+    background: #fdf5d0;
+    color: #8a7520;
+    border: 1px solid #e0c84a;
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s;
+}
+
+.onepipe-pwt-copy-btn:hover {
+    background: #f5e77a;
+}
+
+/* Waiting state */
+.onepipe-pwt-waiting {
+    text-align: center;
+    padding: 20px 0 4px;
+    color: #777;
+    font-size: 13px;
+}
+
+.onepipe-pwt-waiting p {
+    margin: 10px 0 0;
+}
+
+/* Success */
+.onepipe-pwt-success {
+    color: #c9b037;
+    font-weight: 600;
+    font-size: 16px;
+}
+
+/* Error */
+.onepipe-pwt-error-msg {
+    color: #cc3333;
+    font-size: 14px;
+    text-align: center;
+    padding: 12px 0;
+}
+
+/* Loading spinner */
+.onepipe-pwt-spinner {
+    display: inline-block;
+    width: 28px;
+    height: 28px;
+    border: 3px solid #e0e0e0;
+    border-top-color: #d4af37;
+    border-radius: 50%;
+    animation: onepipe-pwt-spin 0.7s linear infinite;
+}
+
+@keyframes onepipe-pwt-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.onepipe-pwt-loading {
+    text-align: center;
+    padding: 40px 24px;
+}
+
+.onepipe-pwt-loading p {
+    margin: 16px 0 0;
+    color: #777;
+}
+
+/* Footer */
+.onepipe-pwt-modal-footer {
+    padding: 12px 24px;
+    border-top: 1px solid #f0f0f0;
+    text-align: right;
+}
+
+.onepipe-pwt-close-btn {
+    background: none;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-size: 13px;
+    color: #666;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.onepipe-pwt-close-btn:hover {
+    background: #f5f5f5;
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+    .onepipe-pwt-modal {
+        max-width: 100%;
+        border-radius: 8px;
+    }
+
+    .onepipe-pwt-detail {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+    }
+
+    .onepipe-pwt-value {
+        text-align: left;
+    }
+
+    .onepipe-pwt-acct-num {
+        font-size: 16px;
+    }
+}
