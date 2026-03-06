@@ -228,15 +228,47 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
 
         global $wpdb;
 
-        $status = $wpdb->get_var( $wpdb->prepare(
-            "SELECT payment_status FROM {$wpdb->prefix}fluentform_submissions WHERE id = %d",
+        $row = $wpdb->get_row( $wpdb->prepare(
+            "SELECT payment_status, form_id FROM {$wpdb->prefix}fluentform_submissions WHERE id = %d",
             $submission_id
         ) );
 
+        $status      = $row->payment_status ?? 'pending';
+        $is_paid     = 'paid' === $status;
+        $redirect_url = '';
+
+        if ( $is_paid && ! empty( $row->form_id ) ) {
+            $redirect_url = $this->getConfirmationRedirectUrl( (int) $row->form_id );
+        }
+
         wp_send_json_success( array(
-            'payment_status' => $status ?? 'pending',
-            'is_paid'        => 'paid' === $status,
+            'payment_status' => $status,
+            'is_paid'        => $is_paid,
+            'redirect_url'   => $redirect_url,
         ) );
+    }
+
+    /**
+     * Get the confirmation redirect URL from form settings.
+     *
+     * @param int $form_id Form ID.
+     * @return string URL to redirect to, or empty string for same-page / message confirmations.
+     */
+    private function getConfirmationRedirectUrl( $form_id ) {
+        $form_settings = \FluentForm\App\Helpers\Helper::getFormMeta( $form_id, 'formSettings', array() );
+        $redirect_to   = $form_settings['confirmation']['redirectTo'] ?? '';
+
+        if ( empty( $redirect_to ) ) {
+            return '';
+        }
+
+        if ( 'customUrl' === $redirect_to ) {
+            return esc_url_raw( $form_settings['confirmation']['customUrl'] ?? '' );
+        }
+
+        // It's a page ID.
+        $url = get_permalink( (int) $redirect_to );
+        return $url ? esc_url_raw( $url ) : '';
     }
 
     /**

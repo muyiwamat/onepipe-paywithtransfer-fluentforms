@@ -212,12 +212,18 @@
         });
     }
 
-    function showSuccessState() {
+    function showSuccessState(redirectUrl) {
         var $modal = $('#onepipe-pwt-modal');
         $modal.find('.onepipe-pwt-waiting').html(
             '<p class="onepipe-pwt-success">' + i18n.paymentConfirmed + '</p>'
         );
-        setTimeout(function () { window.location.reload(); }, 2500);
+        setTimeout(function () {
+            if (redirectUrl) {
+                window.location.href = redirectUrl;
+            } else {
+                window.location.reload();
+            }
+        }, 2500);
     }
 
     function startPolling(submissionId) {
@@ -235,7 +241,7 @@
                 success: function (response) {
                     if (response.success && response.data && response.data.is_paid) {
                         clearInterval(pollInterval);
-                        showSuccessState();
+                        showSuccessState(response.data.redirect_url || '');
                     }
                 }
             });
