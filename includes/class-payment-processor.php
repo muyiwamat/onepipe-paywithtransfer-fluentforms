@@ -30,6 +30,9 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
         add_action( 'fluentform/process_payment_onepipe_pwt', array( $this, 'handlePaymentAction' ), 10, 6 );
         add_action( 'fluentform/ipn_endpoint_onepipe_pwt', array( $this, 'handleWebhook' ) );
 
+        // Append OnePipe payment data to FF webhook/integration payloads (e.g. Pabbly).
+        add_filter( 'fluentform/webhook_request_data', array( $this, 'appendOnepipeDataToWebhook' ), 10, 5 );
+
         // AJAX for fetching virtual account (logged-in and guest users).
         add_action( 'wp_ajax_onepipe_pwt_get_account', array( $this, 'ajaxGetAccount' ) );
         add_action( 'wp_ajax_nopriv_onepipe_pwt_get_account', array( $this, 'ajaxGetAccount' ) );
@@ -405,6 +408,48 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
 
         // Fire FF confirmations, notifications, integrations, etc.
         $this->completePaymentSubmission();
+    }
+
+    /**
+     * Append OnePipe payment data to Fluent Forms webhook/integration payloads.
+     *
+     * Fires via the fluentform/webhook_request_data filter before FF sends data
+     * to any webhook integration (Pabbly, Zapier, etc.). Adds an '__onepipe' key
+     * containing payment details from the stored webhook response.
+     *
+     * @param array  $data     Current payload data.
+     * @param array  $settings Integration settings.
+     * @param array  $formData Raw form submission data.
+     * @param object $form     Form object.
+     * @param object $entry    Submission entry object.
+     * @return array Modified payload data.
+     */
+    public function appendOnepipeDataToWebhook( $data, $settings, $formData, $form, $entry ) {
+        $raw = \FluentForm\App\Helpers\Helper::getSubmissionMeta( $entry->id, '_onepipe_pwt_webhook_response' );
+
+        if ( empty( $raw ) ) {
+            return $data;
+        }
+
+        $payload  = json_decode( $raw, true );
+        $details  = $payload['details'] ?? array();
+        $meta     = $details['meta']    ?? array();
+        $pdata    = $details['data']    ?? array();
+
+        $data['__onepipe'] = array(
+            'payment_id'             => (string) ( $meta['payment_id']               ?? '' ),
+            'cr_account'             => (string) ( $meta['cr_account']               ?? $pdata['craccount']       ?? '' ),
+            'cr_account_name'        => (string) ( $meta['cr_account_name']          ?? $pdata['craccountname']   ?? '' ),
+            'originator_name'        => (string) ( $pdata['originatorname']          ?? '' ),
+            'originator_account'     => (string) ( $pdata['originatoraccountnumber'] ?? '' ),
+            'originator_bank'        => (string) ( $pdata['bankname']                ?? '' ),
+            'originator_bank_code'   => (string) ( $pdata['bankcode']                ?? '' ),
+            'transaction_ref'        => (string) ( $details['transaction_ref']       ?? '' ),
+            'amount'                 => (string) ( $details['amount']                ?? '' ),
+            'narration'              => (string) ( $pdata['narration']               ?? '' ),
+        );
+
+        return $data;
     }
 
     /**
