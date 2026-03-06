@@ -108,10 +108,15 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
 
         $transaction = $this->getTransaction( $transactionId );
 
+        // Normalize phone for reliable webhook matching.
+        $api            = OnePipe_PWT_API::from_settings();
+        $normalized_phone = $api->normalize_phone( $raw_phone );
+
         // Store everything the AJAX handler will need.
         $this->setMetaData( '_onepipe_pwt_ref', $uniqueHash );
         $this->setMetaData( '_onepipe_pwt_transaction_id', $transactionId );
         $this->setMetaData( '_onepipe_pwt_phone', sanitize_text_field( $raw_phone ) );
+        $this->setMetaData( '_onepipe_pwt_phone_normalized', sanitize_text_field( $normalized_phone ) );
         $this->setMetaData( '_onepipe_pwt_email', sanitize_email( $email_raw ) );
         $this->setMetaData( '_onepipe_pwt_firstname', sanitize_text_field( $firstname ) );
         $this->setMetaData( '_onepipe_pwt_surname', sanitize_text_field( $surname ) );
@@ -234,16 +239,12 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
     /**
      * Handle incoming webhook (IPN) from OnePipe.
      *
-     * OnePipe sends a POST to: ?fluentform_payment_api_notify=onepipe_pwt
-     * or: /wp-json/onepipe-pwt/v1/webhook
+     * OnePipe sends a POST to: ?fluentform_payment_api_notify=1&payment_method=onepipe_pwt
      *
      * We match by payment_id stored in submission meta during ajaxGetAccount().
      */
     public function handleWebhook() {
         $raw_body = file_get_contents( 'php://input' );
-
-        error_log( '[OnePipe PWT] Webhook received. Body: ' . $raw_body );
-        error_log( '[OnePipe PWT] Webhook Signature header: ' . ( $_SERVER['HTTP_SIGNATURE'] ?? '(none)' ) );
 
         if ( empty( $raw_body ) ) {
             status_header( 400 );
@@ -257,10 +258,8 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
             wp_send_json_error( array( 'message' => 'Invalid JSON payload.' ) );
         }
 
-        // Log signature check result but don't reject — we need to confirm the formula first.
-        if ( ! $this->verifyWebhookSignature( $raw_body ) ) {
-            error_log( '[OnePipe PWT] Webhook signature mismatch — continuing anyway for diagnostics.' );
-        }
+        // Signature check — non-blocking until we confirm the formula.
+        $this->verifyWebhookSignature( $raw_body );
 
         // Extract the relevant fields from the webhook structure.
         $details    = $payload['details'] ?? array();
@@ -269,8 +268,6 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
         $status     = strtolower( $details['status'] ?? '' );
         $payment_id = (string) ( $meta['payment_id'] ?? '' );
 
-        error_log( '[OnePipe PWT] Webhook fields — event_type: ' . $event_type . ', status: ' . $status . ', payment_id: ' . $payment_id );
-
         // Only act on successful credit events.
         if ( 'credit' !== $event_type || 'successful' !== $status || empty( $payment_id ) ) {
             status_header( 200 );
@@ -278,12 +275,16 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
             return;
         }
 
-        // Find the submission that holds this payment_id.
+        // Find the submission — try payment_id first, then fall back to phone via customer_ref.
         $submission_id = $this->findSubmissionByPaymentId( $payment_id );
 
+        if ( ! $submission_id && ! empty( $details['customer_ref'] ) ) {
+            $submission_id = $this->findSubmissionByCustomerRef( $details['customer_ref'] );
+        }
+
         if ( ! $submission_id ) {
-            status_header( 404 );
-            wp_send_json_error( array( 'message' => 'No submission found for payment_id: ' . $payment_id ) );
+            status_header( 200 );
+            wp_send_json_success( array( 'message' => 'No matching submission found.' ) );
             return;
         }
 
@@ -333,10 +334,44 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
         global $wpdb;
 
         $submission_id = $wpdb->get_var( $wpdb->prepare(
-            "SELECT submission_id FROM {$wpdb->prefix}fluentform_submission_meta
+            "SELECT response_id FROM {$wpdb->prefix}fluentform_submission_meta
              WHERE meta_key = '_onepipe_pwt_payment_id' AND value = %s
              LIMIT 1",
             $payment_id
+        ) );
+
+        return $submission_id ? (int) $submission_id : null;
+    }
+
+    /**
+     * Find a pending submission by customer_ref from the webhook.
+     *
+     * customer_ref format: {phone}_{biller_code} e.g. "2348012345678_000042"
+     * We extract the phone and match against the normalized phone stored in meta.
+     *
+     * @param string $customer_ref OnePipe customer_ref from webhook.
+     * @return int|null Submission ID or null.
+     */
+    private function findSubmissionByCustomerRef( $customer_ref ) {
+        // Strip the trailing _{biller_code} to get the phone.
+        $phone = (string) preg_replace( '/_[^_]+$/', '', $customer_ref );
+
+        if ( empty( $phone ) ) {
+            return null;
+        }
+
+        global $wpdb;
+
+        $submission_id = $wpdb->get_var( $wpdb->prepare(
+            "SELECT sm.response_id
+             FROM {$wpdb->prefix}fluentform_submission_meta sm
+             INNER JOIN {$wpdb->prefix}fluentform_submissions s ON s.id = sm.response_id
+             WHERE sm.meta_key = '_onepipe_pwt_phone_normalized'
+               AND sm.value = %s
+               AND s.payment_status = 'pending'
+             ORDER BY sm.id DESC
+             LIMIT 1",
+            $phone
         ) );
 
         return $submission_id ? (int) $submission_id : null;

@@ -66,7 +66,7 @@ Go to **Fluent Forms → Settings → Payment Settings → OnePipe PayWithTransf
 OnePipe must be configured to send payment notifications to your site. The webhook URL is:
 
 ```
-https://yoursite.com/?fluentform_payment_api_notify=onepipe_pwt
+https://yoursite.com/?fluentform_payment_api_notify=1&payment_method=onepipe_pwt
 ```
 
 Configure this URL in your **PayWithAccount merchant dashboard** (separate from the OnePipe API dashboard). Contact OnePipe support if you cannot find the webhook settings.

@@ -95,7 +95,7 @@ class OnePipe_PWT_Payment_Method extends BasePaymentMethod {
                     'inline_help'  => sprintf(
                         /* translators: %s: webhook URL */
                         __( 'Set this URL as your webhook in the OnePipe dashboard: %s', 'onepipe-pwt' ),
-                        '<br><code>' . esc_url( site_url( '/?fluentform_payment_api_notify=onepipe_pwt' ) ) . '</code>'
+                        '<br><code>' . esc_url( add_query_arg( array( 'fluentform_payment_api_notify' => '1', 'payment_method' => 'onepipe_pwt' ), site_url( '/' ) ) ) . '</code>'
                     ),
                 ),
             ),
