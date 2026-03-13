@@ -71,7 +71,6 @@
         });
     }
 
-    initForms($);
     $(document).ready(function () {
         initForms($);
     });
