@@ -126,9 +126,7 @@ OnePipe webhook POST
 
 ### 1.0.3
 - Fixed: post-payment redirect not navigating to the configured confirmation page ("To a Page" setting). Fluent Forms stores the page ID under `customPage`, not `redirectTo` — the wrong key was being read, causing a silent fallback to page reload.
-- Fixed: webhook signature verification result was being ignored — any POST to the webhook URL was accepted regardless of signature validity. Verification is now enforced and invalid requests are rejected with HTTP 401.
-- Fixed: webhook signature was being looked for in the HTTP `Signature` header, but OnePipe sends it inside the JSON body at `details.meta.signature_hash`. Corrected the formula to `MD5(request_ref + ';' + api_secret)`, consistent with outgoing request signing.
-- Added: admin email alert when a webhook is rejected due to signature mismatch.
+- Improved: webhook signature verification now logs the received `signature_hash` and several candidate formula results against the incoming `request_ref`. Enforcement is pending confirmation of OnePipe's signing method from real webhook logs.
 
 ### 1.0.0
 - Initial release
