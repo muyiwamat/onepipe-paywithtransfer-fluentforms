@@ -3,7 +3,7 @@
  * Plugin Name: OnePipe PayWithTransfer for Fluent Forms
  * Plugin URI:  https://github.com/muiywamat/onepipe-paywithtransfer
  * Description: Adds OnePipe PayWithTransfer as a payment method in Fluent Forms. Customers pay by bank transfer to a generated and static virtual account.
- * Version:     1.0.0
+ * Version:     1.0.3
  * Author:      Múyìwá Mátùlúkò
  * Author URI:  https://muyosan.com.ng
  * License:     GPL-2.0-or-later
@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'ONEPIPE_PWT_VERSION', '1.0.0' );
+define( 'ONEPIPE_PWT_VERSION', '1.0.3' );
 define( 'ONEPIPE_PWT_PATH', plugin_dir_path( __FILE__ ) );
 define( 'ONEPIPE_PWT_URL', plugin_dir_url( __FILE__ ) );
 define( 'ONEPIPE_PWT_FILE', __FILE__ );

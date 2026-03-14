@@ -294,8 +294,17 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
             wp_send_json_error( array( 'message' => 'Invalid JSON payload.' ) );
         }
 
-        // Signature check — non-blocking until we confirm the formula.
-        $this->verifyWebhookSignature( $raw_body );
+        if ( ! $this->verifyWebhookSignature( $payload ) ) {
+            error_log( '[OnePipe PWT] Webhook rejected: invalid or missing signature.' );
+            wp_mail(
+                get_option( 'admin_email' ),
+                '[OnePipe PWT] Webhook rejected — invalid signature',
+                "A webhook was received but failed signature verification.\n\nRequest ref: " . ( $payload['request_ref'] ?? 'unknown' ) . "\n\nThis could be a spoofed request or a misconfigured API secret. Check your server logs for details."
+            );
+            status_header( 401 );
+            wp_send_json_error( array( 'message' => 'Invalid signature.' ) );
+            return;
+        }
 
         // Extract the relevant fields from the webhook structure.
         $details    = $payload['details'] ?? array();
@@ -332,30 +341,31 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
     }
 
     /**
-     * Verify the webhook request signature.
+     * Verify the webhook signature sent by OnePipe.
      *
-     * OnePipe sends the signature the same way we do on outgoing requests:
-     * Signature header = MD5( api_secret + raw_body )
+     * OnePipe includes the signature inside the JSON body at details.meta.signature_hash.
+     * Formula (confirmed from OnePipe docs and sample payloads):
+     *   MD5( request_ref + ';' + api_secret )
      *
-     * @param string $raw_body Raw request body.
+     * @param array $payload Decoded webhook payload.
      * @return bool
      */
-    private function verifyWebhookSignature( $raw_body ) {
-        $settings   = OnePipe_PWT_Payment_Method::getSettings();
-        $api_secret = $settings['api_secret'] ?? '';
+    private function verifyWebhookSignature( $payload ) {
+        $settings    = OnePipe_PWT_Payment_Method::getSettings();
+        $api_secret  = $settings['api_secret'] ?? '';
+        $request_ref = $payload['request_ref'] ?? '';
 
-        if ( empty( $api_secret ) ) {
+        if ( empty( $api_secret ) || empty( $request_ref ) ) {
             return false;
         }
 
-        $received_sig = $_SERVER['HTTP_SIGNATURE'] ?? '';
+        $received_sig = $payload['details']['meta']['signature_hash'] ?? '';
 
         if ( empty( $received_sig ) ) {
-            // No signature header — only allow through in sandbox for testing.
-            return 'sandbox' === ( $settings['payment_mode'] ?? 'live' );
+            return false;
         }
 
-        $expected_sig = hash( 'md5', $api_secret . $raw_body );
+        $expected_sig = md5( $request_ref . ';' . $api_secret );
 
         return hash_equals( $expected_sig, $received_sig );
     }
