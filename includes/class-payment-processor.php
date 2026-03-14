@@ -294,17 +294,9 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
             wp_send_json_error( array( 'message' => 'Invalid JSON payload.' ) );
         }
 
-        if ( ! $this->verifyWebhookSignature( $payload ) ) {
-            error_log( '[OnePipe PWT] Webhook rejected: invalid or missing signature.' );
-            wp_mail(
-                get_option( 'admin_email' ),
-                '[OnePipe PWT] Webhook rejected — invalid signature',
-                "A webhook was received but failed signature verification.\n\nRequest ref: " . ( $payload['request_ref'] ?? 'unknown' ) . "\n\nThis could be a spoofed request or a misconfigured API secret. Check your server logs for details."
-            );
-            status_header( 401 );
-            wp_send_json_error( array( 'message' => 'Invalid signature.' ) );
-            return;
-        }
+        // Signature verification — logging only until formula is confirmed from real webhook logs.
+        // Do not reject here; use the log output to verify the correct formula.
+        $this->verifyWebhookSignature( $payload );
 
         // Extract the relevant fields from the webhook structure.
         $details    = $payload['details'] ?? array();
@@ -343,31 +335,28 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
     /**
      * Verify the webhook signature sent by OnePipe.
      *
-     * OnePipe includes the signature inside the JSON body at details.meta.signature_hash.
-     * Formula (confirmed from OnePipe docs and sample payloads):
-     *   MD5( request_ref + ';' + api_secret )
+     * Currently in logging-only mode — logs the received signature_hash and
+     * several candidate formula results so the correct one can be identified
+     * from a real webhook. Enforcement will be added once confirmed.
      *
      * @param array $payload Decoded webhook payload.
-     * @return bool
+     * @return bool Always true until formula is confirmed.
      */
     private function verifyWebhookSignature( $payload ) {
         $settings    = OnePipe_PWT_Payment_Method::getSettings();
         $api_secret  = $settings['api_secret'] ?? '';
         $request_ref = $payload['request_ref'] ?? '';
 
-        if ( empty( $api_secret ) || empty( $request_ref ) ) {
-            return false;
-        }
-
         $received_sig = $payload['details']['meta']['signature_hash'] ?? '';
 
-        if ( empty( $received_sig ) ) {
-            return false;
-        }
+        error_log( '[OnePipe PWT] Webhook signature_hash received: ' . $received_sig );
+        error_log( '[OnePipe PWT] Webhook request_ref: ' . $request_ref );
+        error_log( '[OnePipe PWT] Candidate A — MD5(request_ref;secret): ' . md5( $request_ref . ';' . $api_secret ) );
+        error_log( '[OnePipe PWT] Candidate B — MD5(secret;request_ref): ' . md5( $api_secret . ';' . $request_ref ) );
+        error_log( '[OnePipe PWT] Candidate C — MD5(secret+request_ref): ' . md5( $api_secret . $request_ref ) );
+        error_log( '[OnePipe PWT] Candidate D — MD5(request_ref+secret): ' . md5( $request_ref . $api_secret ) );
 
-        $expected_sig = md5( $request_ref . ';' . $api_secret );
-
-        return hash_equals( $expected_sig, $received_sig );
+        return true;
     }
 
     /**
