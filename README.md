@@ -2,8 +2,9 @@
 
 A WordPress plugin that adds **OnePipe PayWithTransfer** as a payment method in [Fluent Forms Pro](https://fluentforms.com). Customers pay by bank transfer into a virtual account that OnePipe generates for them — no redirect, no card details, just a simple bank transfer.
 
-**Version:** 1.0.0
+**Version:** 1.0.3
 **Requires:** WordPress 5.6+, PHP 7.4+, Fluent Forms Pro
+**Tested up to:** WordPress 6.9.4, PHP 8.3+,
 **License:** GPL-2.0-or-later
 
 ---

@@ -256,19 +256,20 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
      */
     private function getConfirmationRedirectUrl( $form_id ) {
         $form_settings = \FluentForm\App\Helpers\Helper::getFormMeta( $form_id, 'formSettings', array() );
-        $redirect_to   = $form_settings['confirmation']['redirectTo'] ?? '';
-
-        if ( empty( $redirect_to ) ) {
-            return '';
-        }
+        $confirmation  = $form_settings['confirmation'] ?? array();
+        $redirect_to   = $confirmation['redirectTo'] ?? '';
 
         if ( 'customUrl' === $redirect_to ) {
-            return esc_url_raw( $form_settings['confirmation']['customUrl'] ?? '' );
+            return esc_url_raw( $confirmation['customUrl'] ?? '' );
         }
 
-        // It's a page ID.
-        $url = get_permalink( (int) $redirect_to );
-        return $url ? esc_url_raw( $url ) : '';
+        if ( 'customPage' === $redirect_to ) {
+            $url = get_permalink( (int) ( $confirmation['customPage'] ?? 0 ) );
+            return $url ? esc_url_raw( $url ) : '';
+        }
+
+        // 'samePage' or anything else — no redirect.
+        return '';
     }
 
     /**
