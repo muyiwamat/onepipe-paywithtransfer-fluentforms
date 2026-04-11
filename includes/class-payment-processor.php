@@ -84,9 +84,17 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
         $raw_phone = (string) $raw_phone;
 
         // Read name and email directly from form fields first.
-        $firstname = (string) ( $form_data['first_name'] ?? $form_data['firstname'] ?? '' );
-        $surname   = (string) ( $form_data['last_name']  ?? $form_data['surname']   ?? '' );
-        $email_raw = (string) ( $form_data['email']      ?? $submission->customer_email ?? '' );
+        // FF Name field stores sub-keys under 'names' array.
+        $names_arr = is_array( $form_data['names'] ?? null ) ? $form_data['names'] : array();
+        $firstname = (string) (
+            $form_data['first_name']  ?? $form_data['firstname']  ??
+            $names_arr['first_name']  ?? $names_arr['firstname']  ?? ''
+        );
+        $surname   = (string) (
+            $form_data['last_name']   ?? $form_data['surname']    ??
+            $names_arr['last_name']   ?? $names_arr['surname']    ?? ''
+        );
+        $email_raw = (string) ( $form_data['email'] ?? $submission->customer_email ?? '' );
 
         // Fall back to submission->customer_name if form fields missing.
         if ( empty( $firstname ) && ! empty( $submission->customer_name ) ) {
@@ -96,6 +104,19 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
                 $surname = $name_parts[1] ?? '';
             }
         }
+
+        // Final fallback — try full_name / name keys, then split.
+        if ( empty( $firstname ) ) {
+            $full_name = (string) ( $form_data['full_name'] ?? $form_data['name'] ?? '' );
+            if ( $full_name ) {
+                $name_parts = explode( ' ', trim( $full_name ), 2 );
+                $firstname  = $name_parts[0] ?? '';
+                if ( empty( $surname ) ) {
+                    $surname = $name_parts[1] ?? '';
+                }
+            }
+        }
+
 
         // Create a unique hash and a pending transaction record.
         $uniqueHash    = md5( $submission->id . '-' . $form->id . '-' . time() . '-' . wp_rand( 100, 999 ) );

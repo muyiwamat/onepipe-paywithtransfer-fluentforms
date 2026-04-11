@@ -16,15 +16,22 @@
     function OnePipePwtHandler($form, formInstance) {
         this.$form = $form;
         this.formInstance = formInstance;
-        this.formId = formInstance.settings.id;
     }
 
     OnePipePwtHandler.prototype.init = function () {
         var self = this;
 
-        // Fluent Forms triggers this event when our payment method's
-        // handlePaymentAction returns with nextAction = 'onepipe_pwt'.
-        this.$form.on('fluentform_next_action_onepipe_pwt', function (e, actionData) {
+        // Listen at document level — FF triggers this event on the form and it
+        // bubbles up. Form-level listeners can miss it due to jQuery wrapper
+        // timing differences (confirmed via console testing). Filter by form
+        // identity using actionData.form passed by FF in the event payload.
+        $(document).on('fluentform_next_action_onepipe_pwt', function (e, actionData) {
+            if (!actionData || !actionData.form) { return; }
+            // Use form_id for matching — more reliable than DOM identity, which
+            // can fail if Vue re-renders the form element after initForms ran.
+            // eslint-disable-next-line eqeqeq
+            if (actionData.form.data('form_id') != self.$form.data('form_id')) { return; }
+
             var data = actionData.response.data;
 
             // Show a message below the form.
@@ -45,8 +52,10 @@
     OnePipePwtHandler.prototype.showPaymentModal = function (data) {
         var self = this;
 
-        // Hide the form's progress indicator.
-        this.formInstance.hideFormSubmissionProgress(this.$form);
+        // Hide the form's progress indicator if formInstance is available.
+        if (this.formInstance) {
+            this.formInstance.hideFormSubmissionProgress(this.$form);
+        }
 
         showLoadingModal();
         fetchAccountDetails(data, this.$form, function (account) {
@@ -57,23 +66,28 @@
 
     /**
      * Initialize handler on all payment forms.
+     *
+     * Attach the fluentform_next_action_onepipe_pwt listener immediately
+     * rather than waiting for fluentform_init_single, which can fire before
+     * this script executes (race condition when FF's scripts load first).
+     * formInstance is updated if/when fluentform_init_single fires so that
+     * hideFormSubmissionProgress() still works when available.
      */
     function initForms($) {
         $.each($('form.fluentform_has_payment'), function () {
             var $form = $(this);
+            var handler = new OnePipePwtHandler($form, null);
 
-            function onFormInit(e, formInstance) {
-                new OnePipePwtHandler($form, formInstance).init();
-            }
+            handler.init();
 
-            $form.off('fluentform_init_single', '', onFormInit);
-            $form.on('fluentform_init_single', onFormInit);
+            $form.on('fluentform_init_single', function (e, formInstance) {
+                handler.formInstance = formInstance;
+            });
         });
     }
 
-    $(document).ready(function () {
-        initForms($);
-    });
+    // Script is footer-loaded so DOM is already ready — call directly.
+    initForms($);
 
     // ─── Helper functions ────────────────────────────────────────────
 

@@ -2,7 +2,7 @@
 
 A WordPress plugin that adds **OnePipe PayWithTransfer** as a payment method in [Fluent Forms Pro](https://fluentforms.com). Customers pay by bank transfer into a virtual account that OnePipe generates for them — no redirect, no card details, just a simple bank transfer.
 
-**Version:** 1.0.3
+**Version:** 1.0.4
 **Requires:** WordPress 5.6+, PHP 7.4+, Fluent Forms Pro
 **Tested up to:** WordPress 6.9.4, PHP 8.3+,
 **License:** GPL-2.0-or-later
@@ -123,6 +123,12 @@ OnePipe webhook POST
 ---
 
 ## Changelog
+
+### 1.0.4
+- Fixed: payment modal not appearing on forms other than the first one — the frontend script relied on `$(document).ready()` which was blocked by Kinsta's server cache serving a stale JS file; replaced with a direct call since the script is footer-loaded and the DOM is always ready by then.
+- Fixed: `payer_name cannot be empty` error from OnePipe when the form uses a Fluent Forms `names` compound field (with sub-keys `first_name`/`last_name`) instead of flat `first_name`/`last_name` keys — the processor now checks the nested `names` array and also handles `full_name`/`name` fields as a final fallback.
+- Fixed: TypeError crash in `OnePipePwtHandler` constructor when `formInstance` is `null` — removed the `this.formId = formInstance.settings.id` line that ran before the null check.
+- Removed: temporary diagnostic `console.log` statements added during debugging.
 
 ### 1.0.3
 - Fixed: post-payment redirect not navigating to the configured confirmation page ("To a Page" setting). Fluent Forms stores the page ID under `customPage`, not `redirectTo` — the wrong key was being read, causing a silent fallback to page reload.

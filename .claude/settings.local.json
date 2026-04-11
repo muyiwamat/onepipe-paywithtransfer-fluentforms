@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/muyos/Local Sites/devant/app/public/wp-content/plugins/fluentformpro/src/**)",
+      "Read(//c/Users/muyos/Local Sites/devant/app/public/wp-content/plugins/fluentform/**)"
+    ]
+  }
+}
