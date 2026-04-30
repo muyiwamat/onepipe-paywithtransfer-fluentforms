@@ -108,7 +108,7 @@ class OnePipe_PWT_API {
                 ),
                 'meta'    => array(
                     'type'           => 'single_payment',
-                    'expires_in'     => 30,
+                    'expires_in'     => 15778000,
                     'skip_messaging' => false,
                     'biller_code'    => $this->biller_code,
                 ),
