@@ -132,12 +132,18 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
 
         $transaction = $this->getTransaction( $transactionId );
 
+        // Only the browser that submitted the form gets this key, and both AJAX
+        // endpoints require it, so an entry ID alone can't send another
+        // customer's invoice or read back their virtual account.
+        $accessKey = bin2hex( random_bytes( 16 ) );
+
         // Normalize phone for reliable webhook matching.
         $api            = OnePipe_PWT_API::from_settings();
         $normalized_phone = $api->normalize_phone( $raw_phone );
 
         // Store everything the AJAX handler will need.
         $this->setMetaData( '_onepipe_pwt_ref', $uniqueHash );
+        $this->setMetaData( '_onepipe_pwt_access_key', $accessKey );
         $this->setMetaData( '_onepipe_pwt_transaction_id', $transactionId );
         $this->setMetaData( '_onepipe_pwt_phone', sanitize_text_field( $raw_phone ) );
         $this->setMetaData( '_onepipe_pwt_phone_normalized', sanitize_text_field( $normalized_phone ) );
@@ -152,6 +158,7 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
             'actionName'       => 'initOnepipePwtModal',
             'submission_id'    => $submission->id,
             'transaction_hash' => $uniqueHash,
+            'access_key'       => $accessKey,
             'amount'           => intval( $transaction->payment_total ),
             'currency'         => $transaction->currency,
             'message'          => __( 'Please complete your payment via bank transfer.', 'onepipe-pwt' ),
@@ -175,6 +182,13 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
 
         if ( ! $submission_id ) {
             wp_send_json_error( array( 'message' => __( 'Missing submission ID.', 'onepipe-pwt' ) ) );
+        }
+
+        if ( ! $this->requestHoldsAccessKey( $submission_id ) ) {
+            error_log( '[OnePipe PWT] Account lookup for submission #' . $submission_id . ' refused: missing or wrong access key.' );
+            wp_send_json_error( array(
+                'message' => __( 'This payment could not be verified. Please submit the form again.', 'onepipe-pwt' ),
+            ) );
         }
 
         // Read customer data stored during handlePaymentAction.
@@ -246,7 +260,7 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
 
         $submission_id = absint( $_POST['submission_id'] ?? 0 );
 
-        if ( ! $submission_id ) {
+        if ( ! $submission_id || ! $this->requestHoldsAccessKey( $submission_id ) ) {
             wp_send_json_error( array( 'message' => __( 'Invalid submission.', 'onepipe-pwt' ) ) );
         }
 
@@ -270,6 +284,20 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
             'is_paid'        => $is_paid,
             'redirect_url'   => $redirect_url,
         ) );
+    }
+
+    /**
+     * Whether the request carries the access key that handlePaymentAction()
+     * gave this submission's browser. Entries made before 1.0.6 have none.
+     *
+     * @param int $submission_id Form submission ID.
+     * @return bool
+     */
+    private function requestHoldsAccessKey( $submission_id ) {
+        $expected = (string) \FluentForm\App\Helpers\Helper::getSubmissionMeta( $submission_id, '_onepipe_pwt_access_key', '' );
+        $given    = isset( $_POST['access_key'] ) && is_string( $_POST['access_key'] ) ? trim( wp_unslash( $_POST['access_key'] ) ) : '';
+
+        return '' !== $expected && hash_equals( $expected, $given );
     }
 
     /**

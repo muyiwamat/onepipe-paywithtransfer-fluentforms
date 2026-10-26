@@ -60,7 +60,7 @@
         showLoadingModal();
         fetchAccountDetails(data, this.$form, function (account) {
             showAccountModal(account, data);
-            startPolling(data.submission_id);
+            startPolling(data.submission_id, data.access_key);
         });
     };
 
@@ -116,6 +116,7 @@
                 action:        'onepipe_pwt_get_account',
                 nonce:         config.nonce,
                 submission_id: data.submission_id,
+                access_key:    data.access_key,
                 email:         formData.email,
                 firstname:     formData.firstname,
                 surname:       formData.surname,
@@ -239,7 +240,7 @@
         }, 2500);
     }
 
-    function startPolling(submissionId) {
+    function startPolling(submissionId, accessKey) {
         if (pollInterval) { clearInterval(pollInterval); }
 
         pollInterval = setInterval(function () {
@@ -249,7 +250,8 @@
                 data: {
                     action:        'onepipe_pwt_check_status',
                     nonce:         config.nonce,
-                    submission_id: submissionId
+                    submission_id: submissionId,
+                    access_key:    accessKey
                 },
                 success: function (response) {
                     if (response.success && response.data && response.data.is_paid) {

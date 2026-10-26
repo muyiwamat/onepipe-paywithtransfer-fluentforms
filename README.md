@@ -2,7 +2,7 @@
 
 A WordPress plugin that adds **OnePipe PayWithTransfer** as a payment method in [Fluent Forms Pro](https://fluentforms.com). Customers pay by bank transfer into a virtual account that OnePipe generates for them — no redirect, no card details, just a simple bank transfer.
 
-**Version:** 1.0.5
+**Version:** 1.0.6
 **Requires:** WordPress 5.6+, PHP 7.4+, Fluent Forms Pro
 **Tested up to:** WordPress 6.9.4, PHP 8.3+,
 **License:** GPL-2.0-or-later
@@ -107,12 +107,13 @@ onepipe-paywithtransfer/
 
 ```
 Form submit
-  → handlePaymentAction()         Creates pending FF transaction, stores meta
+  → handlePaymentAction()         Creates pending FF transaction, stores meta and an access key,
+                                  returns the key to the submitting browser only
   → JS: fluentform_next_action_onepipe_pwt triggered
-  → JS: AJAX onepipe_pwt_get_account
-  → ajaxGetAccount()              Calls OnePipe send_invoice API
+  → JS: AJAX onepipe_pwt_get_account (entry ID + access key)
+  → ajaxGetAccount()              Checks the key, calls OnePipe send_invoice API
   → Modal shown with account details
-  → JS polls onepipe_pwt_check_status every 20 seconds
+  → JS polls onepipe_pwt_check_status every 20 seconds (entry ID + access key)
 
 OnePipe webhook POST
   → handleWebhook()               Reads body and headers
@@ -126,6 +127,9 @@ OnePipe webhook POST
 ---
 
 ## Changelog
+
+### 1.0.6
+- Security: the account lookup (`onepipe_pwt_get_account`) and the status check (`onepipe_pwt_check_status`) accepted any entry ID with the form's public nonce, so anyone could make OnePipe send an invoice (and its SMS/email) for another customer's entry and read back their virtual account. Each payment now gets a random access key (`_onepipe_pwt_access_key`), returned only to the browser that submitted the form; both endpoints refuse a request without it. Entries submitted before 1.0.6 have no key, so their lookup is refused.
 
 ### 1.0.5
 - Fixed: the webhook marked an entry paid whatever amount was transferred. It now marks it paid only when the transfer (`details.amount`, kobo) covers the entry's total; a shorter transfer leaves the entry pending, is stored as `_onepipe_pwt_short_payment` and is noted in the entry's activity log.
