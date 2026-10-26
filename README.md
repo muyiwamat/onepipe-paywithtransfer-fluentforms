@@ -2,7 +2,7 @@
 
 A WordPress plugin that adds **OnePipe PayWithTransfer** as a payment method in [Fluent Forms Pro](https://fluentforms.com). Customers pay by bank transfer into a virtual account that OnePipe generates for them — no redirect, no card details, just a simple bank transfer.
 
-**Version:** 1.0.4
+**Version:** 1.0.5
 **Requires:** WordPress 5.6+, PHP 7.4+, Fluent Forms Pro
 **Tested up to:** WordPress 6.9.4, PHP 8.3+,
 **License:** GPL-2.0-or-later
@@ -115,7 +115,10 @@ Form submit
   → JS polls onepipe_pwt_check_status every 20 seconds
 
 OnePipe webhook POST
-  → handleWebhook()               Verifies payload, finds submission by payment_id
+  → handleWebhook()               Reads body and headers
+  → processWebhook()              Checks the Signature header, finds the submission by payment_id
+                                  (or a single pending entry of the exact amount for that phone),
+                                  skips it if already paid, refuses a transfer below the total
   → changeTransactionStatus('paid')
   → completePaymentSubmission()   Fires FF confirmation/redirect
 ```
@@ -123,6 +126,13 @@ OnePipe webhook POST
 ---
 
 ## Changelog
+
+### 1.0.5
+- Fixed: the webhook marked an entry paid whatever amount was transferred. It now marks it paid only when the transfer (`details.amount`, kobo) covers the entry's total; a shorter transfer leaves the entry pending, is stored as `_onepipe_pwt_short_payment` and is noted in the entry's activity log.
+- Fixed: when a webhook's `payment_id` matched no entry, the newest pending entry for that phone number was marked paid. The fallback now only takes a pending entry whose total is exactly the transferred amount, and only when it is the only one.
+- Fixed: a repeat webhook for an entry that is already paid no longer runs the paid actions again.
+- Changed: webhook signatures are checked as OnePipe's Postman collection describes: a `Signature` header of `MD5(request_ref;api_secret)` (or `details.meta.signature_hash` in the body). A new **Webhook Signature** setting decides what happens: **Log only** (default) logs the result and processes the webhook; **Enforce** rejects webhooks without a valid signature. Switch to Enforce once a real payment has logged `valid`. The incoming headers are stored on the entry as `_onepipe_pwt_webhook_headers` (cookies and authorization reduced to their length).
+- Security: the account lookup no longer sends OnePipe's `payment_id` or its raw error response to the browser.
 
 ### 1.0.4
 - Fixed: payment modal not appearing on forms other than the first one — the frontend script relied on `$(document).ready()` which was blocked by Kinsta's server cache serving a stale JS file; replaced with a direct call since the script is footer-loaded and the DOM is always ready by then.

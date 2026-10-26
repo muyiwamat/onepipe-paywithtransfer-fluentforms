@@ -89,6 +89,16 @@ class OnePipe_PWT_Payment_Method extends BasePaymentMethod {
                     'check_status' => 'yes',
                 ),
                 array(
+                    'settings_key' => 'webhook_signature',
+                    'type'         => 'input-radio',
+                    'label'        => __( 'Webhook Signature', 'onepipe-pwt' ),
+                    'options'      => array(
+                        'log'     => __( 'Log only', 'onepipe-pwt' ),
+                        'enforce' => __( 'Enforce', 'onepipe-pwt' ),
+                    ),
+                    'inline_help'  => __( 'Webhooks should carry a Signature header of MD5(request_ref;API secret). Log only records the check in the PHP error log ("[OnePipe PWT] Webhook signature ...") and processes the webhook anyway. Switch to Enforce once a real payment has logged "valid"; webhooks without a valid signature are then rejected.', 'onepipe-pwt' ),
+                ),
+                array(
                     'settings_key' => 'webhook_info',
                     'type'         => 'html_attr',
                     'label'        => __( 'Webhook URL', 'onepipe-pwt' ),
@@ -118,11 +128,12 @@ class OnePipe_PWT_Payment_Method extends BasePaymentMethod {
      */
     public static function getSettings() {
         $defaults = array(
-            'is_active'    => 'no',
-            'payment_mode' => 'sandbox',
-            'api_key'      => '',
-            'api_secret'   => '',
-            'biller_code'  => '',
+            'is_active'         => 'no',
+            'payment_mode'      => 'sandbox',
+            'api_key'           => '',
+            'api_secret'        => '',
+            'biller_code'       => '',
+            'webhook_signature' => 'log',
         );
 
         $settings = get_option( self::SETTINGS_KEY, array() );

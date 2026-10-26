@@ -220,9 +220,9 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
         $account = $api->parse_account_from_response( $response );
 
         if ( empty( $account['account_number'] ) ) {
+            error_log( '[OnePipe PWT] Submission #' . $submission_id . ': no virtual account in the OnePipe response: ' . wp_json_encode( $response ) );
             wp_send_json_error( array(
-                'message'  => __( 'Could not retrieve virtual account details. Please try again.', 'onepipe-pwt' ),
-                'raw_data' => $response,
+                'message' => __( 'Could not retrieve virtual account details. Please try again.', 'onepipe-pwt' ),
             ) );
         }
 
@@ -232,6 +232,9 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
             $this->setMetaData( '_onepipe_pwt_payment_id', $account['payment_id'] );
         }
 
+        // The page only shows the account; payment_id is what a webhook is
+        // matched by, so it stays on the server.
+        unset( $account['payment_id'] );
         wp_send_json_success( $account );
     }
 
@@ -297,27 +300,44 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
      * Handle incoming webhook (IPN) from OnePipe.
      *
      * OnePipe sends a POST to: ?fluentform_payment_api_notify=1&payment_method=onepipe_pwt
+     * (the REST route /wp-json/onepipe-pwt/v1/webhook lands here too).
      *
      * We match by payment_id stored in submission meta during ajaxGetAccount().
      */
     public function handleWebhook() {
-        $raw_body = file_get_contents( 'php://input' );
+        $result = $this->processWebhook( (string) file_get_contents( 'php://input' ), $this->getRequestHeaders() );
 
-        if ( empty( $raw_body ) ) {
-            status_header( 400 );
-            wp_send_json_error( array( 'message' => 'Empty request body.' ) );
+        status_header( $result['status'] );
+        if ( $result['success'] ) {
+            wp_send_json_success( array( 'message' => $result['message'] ) );
+        }
+        wp_send_json_error( array( 'message' => $result['message'] ) );
+    }
+
+    /**
+     * Decide what a webhook does. Marks the submission paid only when the
+     * signature check allows it, the submission is found, it isn't paid
+     * already, and the transferred amount covers its total. markAsPaid()
+     * sends Fluent Forms' own JSON response and exits.
+     *
+     * @param string $raw_body Raw request body.
+     * @param array  $headers  Request headers, keys lower-case.
+     * @return array{status:int,success:bool,message:string}
+     */
+    public function processWebhook( $raw_body, $headers ) {
+        if ( '' === $raw_body ) {
+            return $this->webhookResult( 400, false, 'Empty request body.' );
         }
 
         $payload = json_decode( $raw_body, true );
 
         if ( ! is_array( $payload ) ) {
-            status_header( 400 );
-            wp_send_json_error( array( 'message' => 'Invalid JSON payload.' ) );
+            return $this->webhookResult( 400, false, 'Invalid JSON payload.' );
         }
 
-        // Signature verification — logging only until formula is confirmed from real webhook logs.
-        // Do not reject here; use the log output to verify the correct formula.
-        $this->verifyWebhookSignature( $payload );
+        if ( ! $this->verifyWebhookSignature( $payload, $headers ) ) {
+            return $this->webhookResult( 401, false, 'Invalid signature.' );
+        }
 
         // Extract the relevant fields from the webhook structure.
         $details    = $payload['details'] ?? array();
@@ -325,59 +345,209 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
         $event_type = strtolower( $meta['event_type'] ?? '' );
         $status     = strtolower( $details['status'] ?? '' );
         $payment_id = (string) ( $meta['payment_id'] ?? '' );
+        $amount     = $details['amount'] ?? null;
 
         // Only act on successful credit events.
         if ( 'credit' !== $event_type || 'successful' !== $status || empty( $payment_id ) ) {
-            status_header( 200 );
-            wp_send_json_success( array( 'message' => 'Acknowledged.' ) );
-            return;
+            return $this->webhookResult( 200, true, 'Acknowledged.' );
         }
+
+        // details.amount is in kobo, like Fluent Forms' payment_total.
+        if ( ! is_numeric( $amount ) || (int) $amount <= 0 ) {
+            error_log( '[OnePipe PWT] Webhook for payment_id ' . $payment_id . ' has no usable amount; nothing marked paid.' );
+            return $this->webhookResult( 200, true, 'No amount; nothing marked paid.' );
+        }
+        $amount = (int) $amount;
 
         // Find the submission — try payment_id first, then fall back to phone via customer_ref.
         $submission_id = $this->findSubmissionByPaymentId( $payment_id );
 
         if ( ! $submission_id && ! empty( $details['customer_ref'] ) ) {
-            $submission_id = $this->findSubmissionByCustomerRef( $details['customer_ref'] );
+            $submission_id = $this->findSubmissionByCustomerRef( $details['customer_ref'], $amount );
         }
 
         if ( ! $submission_id ) {
-            status_header( 200 );
-            wp_send_json_success( array( 'message' => 'No matching submission found.' ) );
-            return;
+            return $this->webhookResult( 200, true, 'No matching submission found.' );
         }
 
         $this->setSubmissionId( $submission_id );
+        $this->setMetaData( '_onepipe_pwt_webhook_headers', wp_json_encode( $this->redactHeaders( $headers ) ) );
+        $submission = $this->getSubmission();
+
+        // A repeat delivery, or a second transfer for the same invoice, must not
+        // run the paid actions again.
+        if ( 'paid' === ( $submission->payment_status ?? '' ) ) {
+            error_log( '[OnePipe PWT] Webhook for submission #' . $submission_id . ' ignored: already paid.' );
+            return $this->webhookResult( 200, true, 'Already paid.' );
+        }
+
+        $total = (int) ( $submission->payment_total ?? 0 );
+        if ( $total <= 0 ) {
+            error_log( '[OnePipe PWT] Submission #' . $submission_id . ' has no payment total; nothing marked paid.' );
+            return $this->webhookResult( 200, true, 'No total to compare; nothing marked paid.' );
+        }
+        if ( $amount < $total ) {
+            $this->setMetaData( '_onepipe_pwt_short_payment', wp_json_encode( $payload ) );
+            $this->logSubmissionNote(
+                'failed',
+                __( 'OnePipe transfer below the total', 'onepipe-pwt' ),
+                sprintf(
+                    /* translators: 1: amount transferred, 2: amount due (both in naira). */
+                    __( 'OnePipe reported a transfer of %1$s, but %2$s is due. The entry stays pending.', 'onepipe-pwt' ),
+                    number_format( $amount / 100, 2 ),
+                    number_format( $total / 100, 2 )
+                )
+            );
+            error_log( '[OnePipe PWT] Submission #' . $submission_id . ' left pending: transfer ' . $amount . ' kobo is below the total ' . $total . ' kobo.' );
+            return $this->webhookResult( 200, true, 'Amount below total; left pending.' );
+        }
+
         $this->markAsPaid( $submission_id, $payload );
 
-        status_header( 200 );
-        wp_send_json_success( array( 'message' => 'Webhook processed.' ) );
+        return $this->webhookResult( 200, true, 'Webhook processed.' );
     }
 
     /**
-     * Verify the webhook signature sent by OnePipe.
+     * @return array{status:int,success:bool,message:string}
+     */
+    private function webhookResult( $status, $success, $message ) {
+        return array(
+            'status'  => (int) $status,
+            'success' => (bool) $success,
+            'message' => (string) $message,
+        );
+    }
+
+    /**
+     * Check the webhook's signature.
      *
-     * Currently in logging-only mode — logs the received signature_hash and
-     * several candidate formula results so the correct one can be identified
-     * from a real webhook. Enforcement will be added once confirmed.
+     * OnePipe's Postman collection shows notifications signed like API
+     * requests: a Signature header of MD5(request_ref;api_secret), as
+     * OnePipe_PWT_API::generate_signature() builds it. The collection's example
+     * bodies also carry details.meta.signature_hash, so that is accepted too,
+     * though none of the real webhooks stored before 1.0.5 has it.
+     *
+     * With the "Webhook signature" setting on Log only (the default) the
+     * webhook is processed either way and the result is logged. Switch it to
+     * Enforce once a real webhook has logged "valid": then a webhook without a
+     * valid signature, or any webhook while the API secret is empty, is rejected.
      *
      * @param array $payload Decoded webhook payload.
-     * @return bool Always true until formula is confirmed.
+     * @param array $headers Request headers, keys lower-case.
+     * @return bool Whether processing may continue.
      */
-    private function verifyWebhookSignature( $payload ) {
-        $settings    = OnePipe_PWT_Payment_Method::getSettings();
-        $api_secret  = $settings['api_secret'] ?? '';
-        $request_ref = $payload['request_ref'] ?? '';
+    private function verifyWebhookSignature( $payload, $headers ) {
+        $settings = OnePipe_PWT_Payment_Method::getSettings();
+        $enforce  = 'enforce' === ( $settings['webhook_signature'] ?? 'log' );
+        $api      = OnePipe_PWT_API::from_settings();
 
-        $received_sig = $payload['details']['meta']['signature_hash'] ?? '';
+        if ( '' === $api->get_api_secret() ) {
+            error_log( '[OnePipe PWT] Webhook signature not checked: the API secret is empty.' . ( $enforce ? ' Rejected.' : '' ) );
+            return ! $enforce;
+        }
 
-        error_log( '[OnePipe PWT] Webhook signature_hash received: ' . $received_sig );
-        error_log( '[OnePipe PWT] Webhook request_ref: ' . $request_ref );
-        error_log( '[OnePipe PWT] Candidate A — MD5(request_ref;secret): ' . md5( $request_ref . ';' . $api_secret ) );
-        error_log( '[OnePipe PWT] Candidate B — MD5(secret;request_ref): ' . md5( $api_secret . ';' . $request_ref ) );
-        error_log( '[OnePipe PWT] Candidate C — MD5(secret+request_ref): ' . md5( $api_secret . $request_ref ) );
-        error_log( '[OnePipe PWT] Candidate D — MD5(request_ref+secret): ' . md5( $request_ref . $api_secret ) );
+        $result = $this->checkWebhookSignature( $payload, $headers, $api );
+        $valid  = 0 === strpos( $result, 'valid' );
 
-        return true;
+        // The collection also shows OnePipe sending our API key as a bearer token.
+        $bearer = trim( (string) preg_replace( '/^bearer\s+/i', '', (string) ( $headers['authorization'] ?? '' ) ) );
+        $key    = trim( (string) ( $settings['api_key'] ?? '' ) );
+        $auth   = '' === $bearer ? 'absent' : ( '' !== $key && hash_equals( $key, $bearer ) ? 'matches the API key' : 'differs from the API key' );
+
+        error_log(
+            '[OnePipe PWT] Webhook signature ' . $result . '; Authorization header ' . $auth
+            . '; headers received: ' . implode( ', ', array_keys( $headers ) ) . '.'
+            . ( $enforce && ! $valid ? ' Rejected.' : '' )
+        );
+
+        return $valid || ! $enforce;
+    }
+
+    /**
+     * "valid (Signature header)", "valid (signature_hash)", "invalid (...)" or "missing".
+     *
+     * @param array           $payload Decoded webhook payload.
+     * @param array           $headers Request headers, keys lower-case.
+     * @param OnePipe_PWT_API $api     API client holding the secret.
+     * @return string
+     */
+    public function checkWebhookSignature( $payload, $headers, $api ) {
+        $request_ref = (string) ( $payload['request_ref'] ?? '' );
+        $received    = array_filter(
+            array(
+                'Signature header' => trim( (string) ( $headers['signature'] ?? '' ) ),
+                'signature_hash'   => trim( (string) ( $payload['details']['meta']['signature_hash'] ?? '' ) ),
+            ),
+            'strlen'
+        );
+
+        if ( '' === $request_ref || ! $received ) {
+            return 'missing';
+        }
+
+        $expected = $api->generate_signature( $request_ref );
+        foreach ( $received as $where => $value ) {
+            if ( hash_equals( $expected, strtolower( $value ) ) ) {
+                return 'valid (' . $where . ')';
+            }
+        }
+
+        return 'invalid (' . implode( ', ', array_keys( $received ) ) . ')';
+    }
+
+    /**
+     * Request headers with lower-case names.
+     *
+     * @return array<string,string>
+     */
+    private function getRequestHeaders() {
+        $headers = array();
+
+        if ( function_exists( 'getallheaders' ) ) {
+            foreach ( (array) getallheaders() as $name => $value ) {
+                $headers[ strtolower( (string) $name ) ] = (string) $value;
+            }
+            return $headers;
+        }
+
+        foreach ( $_SERVER as $key => $value ) {
+            if ( 0 === strpos( $key, 'HTTP_' ) ) {
+                $headers[ strtolower( str_replace( '_', '-', substr( $key, 5 ) ) ) ] = (string) $value;
+            }
+        }
+
+        return $headers;
+    }
+
+    /**
+     * Headers safe to store: cookies and authorization reduced to their length.
+     *
+     * @param array $headers Request headers, keys lower-case.
+     * @return array
+     */
+    private function redactHeaders( $headers ) {
+        foreach ( array( 'cookie', 'authorization', 'proxy-authorization' ) as $name ) {
+            if ( isset( $headers[ $name ] ) ) {
+                $headers[ $name ] = '[' . strlen( $headers[ $name ] ) . ' chars]';
+            }
+        }
+
+        return $headers;
+    }
+
+    /**
+     * Add a line to the entry's activity log in the Fluent Forms admin.
+     */
+    private function logSubmissionNote( $status, $title, $description ) {
+        do_action( 'fluentform/log_data', array(
+            'parent_source_id' => $this->getForm()->id,
+            'source_type'      => 'submission_item',
+            'source_id'        => $this->getSubmissionId(),
+            'component'        => 'Payment',
+            'status'           => $status,
+            'title'            => $title,
+            'description'      => $description,
+        ) );
     }
 
     /**
@@ -400,37 +570,50 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
     }
 
     /**
-     * Find a pending submission by customer_ref from the webhook.
+     * Find the pending submission a transfer pays for, by customer_ref, when
+     * its payment_id matched nothing.
      *
      * customer_ref format: {phone}_{biller_code} e.g. "2348012345678_000042"
      * We extract the phone and match against the normalized phone stored in meta.
      *
+     * Virtual accounts are permanent per phone, so a transfer into one can be
+     * meant for any of the customer's orders. Only a pending submission whose
+     * total is exactly the transferred amount qualifies, and only when it is
+     * the only one: two candidates are left for a person to resolve.
+     *
      * @param string $customer_ref OnePipe customer_ref from webhook.
+     * @param int    $amount       Transferred amount in kobo.
      * @return int|null Submission ID or null.
      */
-    private function findSubmissionByCustomerRef( $customer_ref ) {
+    public function findSubmissionByCustomerRef( $customer_ref, $amount ) {
         // Strip the trailing _{biller_code} to get the phone.
         $phone = (string) preg_replace( '/_[^_]+$/', '', $customer_ref );
 
-        if ( empty( $phone ) ) {
+        if ( empty( $phone ) || (int) $amount <= 0 ) {
             return null;
         }
 
         global $wpdb;
 
-        $submission_id = $wpdb->get_var( $wpdb->prepare(
-            "SELECT sm.response_id
+        $submission_ids = $wpdb->get_col( $wpdb->prepare(
+            "SELECT DISTINCT s.id
              FROM {$wpdb->prefix}fluentform_submission_meta sm
              INNER JOIN {$wpdb->prefix}fluentform_submissions s ON s.id = sm.response_id
              WHERE sm.meta_key = '_onepipe_pwt_phone_normalized'
                AND sm.value = %s
                AND s.payment_status = 'pending'
-             ORDER BY sm.id DESC
-             LIMIT 1",
-            $phone
+               AND s.payment_total = %d
+             LIMIT 2",
+            $phone,
+            (int) $amount
         ) );
 
-        return $submission_id ? (int) $submission_id : null;
+        if ( count( $submission_ids ) > 1 ) {
+            error_log( '[OnePipe PWT] Phone fallback found several pending submissions of ' . (int) $amount . ' kobo for one customer (#' . implode( ', #', $submission_ids ) . '); none marked paid.' );
+            return null;
+        }
+
+        return $submission_ids ? (int) $submission_ids[0] : null;
     }
 
     /**
