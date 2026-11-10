@@ -141,16 +141,24 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
         $api            = OnePipe_PWT_API::from_settings();
         $normalized_phone = $api->normalize_phone( $raw_phone );
 
-        // Store everything the AJAX handler will need.
-        $this->setMetaData( '_onepipe_pwt_ref', $uniqueHash );
-        $this->setMetaData( '_onepipe_pwt_access_key', $accessKey );
-        $this->setMetaData( '_onepipe_pwt_transaction_id', $transactionId );
-        $this->setMetaData( '_onepipe_pwt_phone', sanitize_text_field( $raw_phone ) );
-        $this->setMetaData( '_onepipe_pwt_phone_normalized', sanitize_text_field( $normalized_phone ) );
-        $this->setMetaData( '_onepipe_pwt_email', sanitize_email( $email_raw ) );
-        $this->setMetaData( '_onepipe_pwt_firstname', sanitize_text_field( $firstname ) );
-        $this->setMetaData( '_onepipe_pwt_surname', sanitize_text_field( $surname ) );
-        $this->setMetaData( '_onepipe_pwt_form_title', sanitize_text_field( $form->title ?? '' ) );
+        // Store everything the AJAX handler will need. A buyer can retry the
+        // payment on the same entry, so each value replaces the last attempt's:
+        // setMetaData() always adds a row, while getSubmissionMeta() reads the
+        // oldest, so a retry's access key was refused (entry 52588, 1.0.6).
+        $meta = array(
+            '_onepipe_pwt_ref'              => $uniqueHash,
+            '_onepipe_pwt_access_key'       => $accessKey,
+            '_onepipe_pwt_transaction_id'   => $transactionId,
+            '_onepipe_pwt_phone'            => sanitize_text_field( $raw_phone ),
+            '_onepipe_pwt_phone_normalized' => sanitize_text_field( $normalized_phone ),
+            '_onepipe_pwt_email'            => sanitize_email( $email_raw ),
+            '_onepipe_pwt_firstname'        => sanitize_text_field( $firstname ),
+            '_onepipe_pwt_surname'          => sanitize_text_field( $surname ),
+            '_onepipe_pwt_form_title'       => sanitize_text_field( $form->title ?? '' ),
+        );
+        foreach ( $meta as $key => $value ) {
+            \FluentForm\App\Helpers\Helper::setSubmissionMeta( $submission->id, $key, $value, $form->id );
+        }
 
         // Return JSON — FF triggers fluentform_next_action_onepipe_pwt on the form.
         wp_send_json_success( array(

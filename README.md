@@ -2,7 +2,7 @@
 
 A WordPress plugin that adds **OnePipe PayWithTransfer** as a payment method in [Fluent Forms Pro](https://fluentforms.com). Customers pay by bank transfer into a virtual account that OnePipe generates for them — no redirect, no card details, just a simple bank transfer.
 
-**Version:** 1.0.6
+**Version:** 1.0.7
 **Requires:** WordPress 5.6+, PHP 7.4+, Fluent Forms Pro
 **Tested up to:** WordPress 6.9.4, PHP 8.3+,
 **License:** GPL-2.0-or-later
@@ -127,6 +127,9 @@ OnePipe webhook POST
 ---
 
 ## Changelog
+
+### 1.0.7
+- Fix: a payment retried on the same entry was refused ("Account lookup … refused: missing or wrong access key"). Each attempt added new `_onepipe_pwt_*` rows, but the lookup reads the oldest, so the retry's access key never matched (entry 52588: six retries refused). The values are now saved with `Helper::setSubmissionMeta()`, which replaces the earlier attempt's. Entries that already hold several rows have their oldest row updated, which is the one read.
 
 ### 1.0.6
 - Security: the account lookup (`onepipe_pwt_get_account`) and the status check (`onepipe_pwt_check_status`) accepted any entry ID with the form's public nonce, so anyone could make OnePipe send an invoice (and its SMS/email) for another customer's entry and read back their virtual account. Each payment now gets a random access key (`_onepipe_pwt_access_key`), returned only to the browser that submitted the form; both endpoints refuse a request without it. Entries submitted before 1.0.6 have no key, so their lookup is refused.
