@@ -226,7 +226,8 @@ class OnePipe_PWT_API {
             return new \WP_Error(
                 'onepipe_pwt_api_error',
                 $decoded['message'] ?? __( 'OnePipe API request failed.', 'onepipe-pwt' ),
-                $decoded
+                // 1.0.8: the HTTP status travels with OnePipe's reply (onepipe_pwt/account_failed).
+                ( is_array( $decoded ) ? $decoded : array() ) + array( 'status_code' => $status_code )
             );
         }
 

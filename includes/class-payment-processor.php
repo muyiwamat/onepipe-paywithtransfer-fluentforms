@@ -233,6 +233,18 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
         );
 
         if ( is_wp_error( $response ) ) {
+            /**
+             * OnePipe refused the call or couldn't be reached (1.0.8), so the buyer
+             * got no account to pay into. Brand Press alerts on this.
+             *
+             * @param int    $submission_id
+             * @param string $message OnePipe's message, or WordPress's for a network error.
+             * @param array  $details code (the error code) and status (HTTP status, when OnePipe answered).
+             */
+            do_action( 'onepipe_pwt/account_failed', $submission_id, $response->get_error_message(), array(
+                'code'   => $response->get_error_code(),
+                'status' => (int) ( $response->get_error_data()['status_code'] ?? 0 ),
+            ) );
             wp_send_json_error( array(
                 'message' => $response->get_error_message(),
             ) );
@@ -243,6 +255,10 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
 
         if ( empty( $account['account_number'] ) ) {
             error_log( '[OnePipe PWT] Submission #' . $submission_id . ': no virtual account in the OnePipe response: ' . wp_json_encode( $response ) );
+            do_action( 'onepipe_pwt/account_failed', $submission_id, 'OnePipe answered without a virtual account.', array(
+                'code'   => 'onepipe_pwt_no_account',
+                'status' => 200,
+            ) );
             wp_send_json_error( array(
                 'message' => __( 'Could not retrieve virtual account details. Please try again.', 'onepipe-pwt' ),
             ) );
@@ -253,6 +269,13 @@ class OnePipe_PWT_Payment_Processor extends BaseProcessor {
             $this->setSubmissionId( $submission_id );
             $this->setMetaData( '_onepipe_pwt_payment_id', $account['payment_id'] );
         }
+
+        /**
+         * OnePipe issued an account to pay into (1.0.8): the API works again.
+         *
+         * @param int $submission_id
+         */
+        do_action( 'onepipe_pwt/account_issued', $submission_id );
 
         // The page only shows the account; payment_id is what a webhook is
         // matched by, so it stays on the server.
